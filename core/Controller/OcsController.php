@@ -1,15 +1,11 @@
 <?php
 /**
- * @author Andreas Fischer <bantu@owncloud.com>
  * @author Bart Visscher <bartv@thisnet.nl>
- * @author Frank Karlitschek <frank@karlitschek.de>
- * @author Lukas Reschke <lukas@statuscode.ch>
  * @author Morris Jobke <hey@morrisjobke.de>
  * @author Roeland Jago Douma <rullzer@owncloud.com>
- * @author Thomas Müller <thomas.mueller@tmit.eu>
  * @author Tom Needham <tom@owncloud.com>
  *
- * @copyright Copyright (c) 2018, ownCloud GmbH
+ * @copyright Copyright (c) 2020, ownCloud GmbH
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -26,30 +22,102 @@
  *
  */
 
-namespace OC\OCS;
+namespace OC\Core\Controller;
 
-class PrivateData {
+use OC\OCS\Result;
+
+class OcsController extends \OCP\AppFramework\OCSController {
+	/**
+	 * @NoAdminRequired
+	 * @NoCSRFRequired
+	 * @PublicPage
+	 *
+	 * @return Result
+	 */
+	public function getConfig() {
+		$xml['version'] = '1.7';
+		$xml['website'] = 'ownCloud';
+		$xml['host'] = $this->request->getServerHost();
+		$xml['contact'] = '';
+		$xml['ssl'] = 'false';
+		return new Result($xml);
+	}
+
+	/**
+	 * @NoAdminRequired
+	 * @NoCSRFRequired
+	 * @PublicPage
+	 *
+	 * @param string $login
+	 * @param string $password
+	 *
+	 * @return Result
+	 */
+	public function checkPerson($login, $password) {
+		if ($login && $password) {
+			if (\OC_User::checkPassword($login, $password)) {
+				$xml['person']['personid'] = $login;
+				return new Result($xml);
+			} else {
+				return new Result(null, 102);
+			}
+		} else {
+			return new Result(null, 101);
+		}
+	}
+
+	/**
+	 * read keys
+	 * test: curl http://login:passwd@oc/core/ocs/v1.php/privatedata/getattribute
+	 *
+	 * @NoAdminRequired
+	 * @NoCSRFRequired
+	 *
+	 * @return Result
+	 */
+	public function getDefaultAttributes() {
+		return $this->getAttribute('');
+	}
+
+	/**
+	 * read keys
+	 * test: curl http://login:passwd@oc/core/ocs/v1.php/privatedata/getattribute/testy
+	 *
+	 * @NoAdminRequired
+	 * @NoCSRFRequired
+	 *
+	 * @param string $app
+	 *
+	 * @return Result
+	 */
+	public function getAppAttributes($app) {
+		return $this->getAttribute($app);
+	}
 
 	/**
 	 * read keys
 	 * test: curl http://login:passwd@oc/core/ocs/v1.php/privatedata/getattribute/testy/123
-	 * test: curl http://login:passwd@oc/core/ocs/v1.php/privatedata/getattribute/testy
-	 * @param array $parameters The OCS parameter
-	 * @return \OC_OCS_Result
+	 *
+	 * @NoAdminRequired
+	 * @NoCSRFRequired
+	 *
+	 * @param string $app
+	 * @param string|null $key
+	 *
+	 * @return Result
 	 */
-	public static function get($parameters) {
+	public function getAttribute($app, $key = null) {
 		$user = \OC_User::getUser();
-		$app = \addslashes(\strip_tags($parameters['app']));
-		$key = isset($parameters['key']) ? \addslashes(\strip_tags($parameters['key'])) : null;
-		
-		if (empty($key)) {
+		$app = \addslashes(\strip_tags($app));
+
+		if ($key === null) {
 			$query = \OCP\DB::prepare('SELECT `key`, `app`, `value`  FROM `*PREFIX*privatedata` WHERE `user` = ? AND `app` = ? ');
 			$result = $query->execute([$user, $app]);
 		} else {
 			$query = \OCP\DB::prepare('SELECT `key`, `app`, `value`  FROM `*PREFIX*privatedata` WHERE `user` = ? AND `app` = ? AND `key` = ? ');
 			$result = $query->execute([$user, $app, $key]);
 		}
-		
+
 		$xml = [];
 		while ($row = $result->fetchRow()) {
 			$data= [];
@@ -65,19 +133,25 @@ class PrivateData {
 	/**
 	 * set a key
 	 * test: curl http://login:passwd@oc/core/ocs/v1.php/privatedata/setattribute/testy/123  --data "value=foobar"
-	 * @param array $parameters The OCS parameter
-	 * @return \OC_OCS_Result
+	 *
+	 * @NoAdminRequired
+	 * @NoCSRFRequired
+	 *
+	 * @param string $app
+	 * @param string $key
+	 *
+	 * @return Result
 	 */
-	public static function set($parameters) {
+	public function setAttribute($app, $key) {
 		$user = \OC_User::getUser();
-		$app = \addslashes(\strip_tags($parameters['app']));
-		$key = \addslashes(\strip_tags($parameters['key']));
+		$app = \addslashes(\strip_tags($app));
+		$key = \addslashes(\strip_tags($key));
 		$value = (string)$_POST['value'];
 
 		// update in DB
 		$query = \OCP\DB::prepare('UPDATE `*PREFIX*privatedata` SET `value` = ?  WHERE `user` = ? AND `app` = ? AND `key` = ?');
 		$numRows = $query->execute([$value, $user, $app, $key]);
-				
+
 		if ($numRows === false || $numRows === 0) {
 			// store in DB
 			$query = \OCP\DB::prepare('INSERT INTO `*PREFIX*privatedata` (`user`, `app`, `key`, `value`)' . ' VALUES(?, ?, ?, ?)');
@@ -87,21 +161,28 @@ class PrivateData {
 		return new Result(null, 100);
 	}
 
+
 	/**
 	 * delete a key
 	 * test: curl http://login:passwd@oc/core/ocs/v1.php/privatedata/deleteattribute/testy/123 --data "post=1"
-	 * @param array $parameters The OCS parameter
-	 * @return \OC_OCS_Result
+	 *
+	 * @NoAdminRequired
+	 * @NoCSRFRequired
+	 *
+	 * @param string $app
+	 * @param string $key
+	 *
+	 * @return Result
 	 */
-	public static function delete($parameters) {
+	public function delete($app, $key) {
 		$user = \OC_User::getUser();
 		if (!isset($parameters['app']) or !isset($parameters['key'])) {
 			//key and app are NOT optional here
 			return new Result(null, 101);
 		}
 
-		$app = \addslashes(\strip_tags($parameters['app']));
-		$key = \addslashes(\strip_tags($parameters['key']));
+		$app = \addslashes(\strip_tags($app));
+		$key = \addslashes(\strip_tags($key));
 
 		// delete in DB
 		$query = \OCP\DB::prepare('DELETE FROM `*PREFIX*privatedata`  WHERE `user` = ? AND `app` = ? AND `key` = ? ');

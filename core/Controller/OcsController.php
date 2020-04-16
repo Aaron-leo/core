@@ -1,9 +1,6 @@
 <?php
 /**
- * @author Bart Visscher <bartv@thisnet.nl>
- * @author Morris Jobke <hey@morrisjobke.de>
- * @author Roeland Jago Douma <rullzer@owncloud.com>
- * @author Tom Needham <tom@owncloud.com>
+ * @author Viktar Dubiniuk <dubiniuk@owncloud.com>
  *
  * @copyright Copyright (c) 2020, ownCloud GmbH
  * @license AGPL-3.0
@@ -25,8 +22,32 @@
 namespace OC\Core\Controller;
 
 use OC\OCS\Result;
+use OCP\IRequest;
+use OCP\IUserManager;
+use OCP\IUserSession;
 
 class OcsController extends \OCP\AppFramework\OCSController {
+	/** @var IUserSession */
+	private $userSession;
+
+	/** @var IUserManager */
+	private $userManager;
+
+	/**
+	 * OccController constructor.
+	 *
+	 * @param string $appName
+	 * @param IRequest $request
+	 * @param IUserSession $userSession
+	 */
+	public function __construct($appName, IRequest $request,
+								IUserSession $userSession,
+								IUserManager $userManager) {
+		parent::__construct($appName, $request);
+		$this->userSession = $userSession;
+		$this->userManager = $userManager;
+	}
+
 	/**
 	 * @NoAdminRequired
 	 * @NoCSRFRequired
@@ -55,8 +76,9 @@ class OcsController extends \OCP\AppFramework\OCSController {
 	 */
 	public function checkPerson($login, $password) {
 		if ($login && $password) {
-			if (\OC_User::checkPassword($login, $password)) {
-				$xml['person']['personid'] = $login;
+			$user = $this->userManager->checkPassword($login, $password);
+			if ($user !== false) {
+				$xml['person']['personid'] = $user->getUID();
 				return new Result($xml);
 			} else {
 				return new Result(null, 102);
@@ -107,14 +129,15 @@ class OcsController extends \OCP\AppFramework\OCSController {
 	 * @return Result
 	 */
 	public function getAttribute($app, $key = null) {
-		$user = \OC_User::getUser();
-		$app = \addslashes(\strip_tags($app));
+		$app = $this->escape($app);
+		$user = $this->userSession->getUser()->getUID();
 
 		if ($key === null) {
 			$query = \OCP\DB::prepare('SELECT `key`, `app`, `value`  FROM `*PREFIX*privatedata` WHERE `user` = ? AND `app` = ? ');
 			$result = $query->execute([$user, $app]);
 		} else {
 			$query = \OCP\DB::prepare('SELECT `key`, `app`, `value`  FROM `*PREFIX*privatedata` WHERE `user` = ? AND `app` = ? AND `key` = ? ');
+			$key = $this->escape($key);
 			$result = $query->execute([$user, $app, $key]);
 		}
 
@@ -143,10 +166,10 @@ class OcsController extends \OCP\AppFramework\OCSController {
 	 * @return Result
 	 */
 	public function setAttribute($app, $key) {
-		$user = \OC_User::getUser();
-		$app = \addslashes(\strip_tags($app));
-		$key = \addslashes(\strip_tags($key));
-		$value = (string)$_POST['value'];
+		$app = $this->escape($app);
+		$key = $this->escape($key);
+		$user = $this->userSession->getUser()->getUID();
+		$value = $this->request->getParam('value');
 
 		// update in DB
 		$query = \OCP\DB::prepare('UPDATE `*PREFIX*privatedata` SET `value` = ?  WHERE `user` = ? AND `app` = ? AND `key` = ?');
@@ -160,8 +183,7 @@ class OcsController extends \OCP\AppFramework\OCSController {
 
 		return new Result(null, 100);
 	}
-
-
+	
 	/**
 	 * delete a key
 	 * test: curl http://login:passwd@oc/core/ocs/v1.php/privatedata/deleteattribute/testy/123 --data "post=1"
@@ -174,20 +196,23 @@ class OcsController extends \OCP\AppFramework\OCSController {
 	 *
 	 * @return Result
 	 */
-	public function delete($app, $key) {
-		$user = \OC_User::getUser();
-		if (!isset($parameters['app']) or !isset($parameters['key'])) {
-			//key and app are NOT optional here
-			return new Result(null, 101);
-		}
-
-		$app = \addslashes(\strip_tags($app));
-		$key = \addslashes(\strip_tags($key));
+	public function deleteAttribute($app, $key) {
+		$app = $this->escape($app);
+		$key = $this->escape($key);
+		$user = $this->userSession->getUser()->getUID();
 
 		// delete in DB
 		$query = \OCP\DB::prepare('DELETE FROM `*PREFIX*privatedata`  WHERE `user` = ? AND `app` = ? AND `key` = ? ');
 		$query->execute([$user, $app, $key]);
 
 		return new Result(null, 100);
+	}
+
+	/**
+	 * @param string $value
+	 * @return string
+	 */
+	private function escape($value) {
+		return \addslashes(\strip_tags($value));
 	}
 }

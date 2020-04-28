@@ -53,6 +53,8 @@ fi
 
 # show a little debug information
 php occ app:list
+pwd
+ls -l tests
 
 phpunit_cmd="php ./lib/composer/bin/phpunit"
 if [[ "${COVERAGE}" == "true" ]]; then
